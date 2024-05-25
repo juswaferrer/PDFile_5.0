@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDFile</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='images/favicon_logo.png') }}">
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/pdfile.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+</head>
+<body>
+    <a href="{{ url_for('login') }}" id="logout-button">Logout <i class="fas fa-sign-out-alt"></i></a>
+    <header>
+        <div class="logo">
+            <img src="{{ url_for('static', filename='images/favicon_logo.png') }}" alt="Logo">
+        </div>
+        <h1><span style="color: #d93025;">PDF</span>ile</h1>
+    </header>
+
+    <div id="error-message" style="color: red;"></div>
+
+    <div id="main-container">
+
+        <div id="history-container">
+            <h1 style="font-family: Arial; font-size: 20px;">PDF-History</h1>
+            <div id="history"></div>
+        </div>
+        <div id="chat-container">
+            <div id="response" class="clearfix"></div>
+
+            <form id="user_input">
+                <label for="pdf_file" style="font-family: Arial;">Upload PDF:</label>
+                <input type="file" id="pdf_file" name="pdf_file" accept=".pdf">
+                <button type="button" id="mic_button"><i class="fas fa-microphone"></i></button>
+                <br>
+                <div style="text-align: center;">
+                    <input type="text" id="user_query" name="user_query" placeholder="Type your question...">
+                    <button type="submit" id="send_button">Send</button>    
+                </div>
+            </form>
+
+            <div id="loading-label" style="font-weight: bold; font-style: italic;">Processing your question, Please Wait...</div>
+
+            <div id="loading-gif">
+                <img src="{{ url_for('static', filename='images/loading.gif') }}" alt="Loading...">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Speech Recognition Setup
+        var SpeechRecognition = SpeechRecognition || webkitSpeechRecognition;
+        var recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = "en-US";
+
+        var micButton = document.getElementById('mic_button');
+        var userQuery = document.getElementById('user_query');
+
+        micButton.addEventListener('click', function() {
+            micButton.innerHTML = 'Listening...';
+            recognition.start();
+        });
+
+        recognition.onresult = function(event) {
+            var transcript = event.results[0][0].transcript;
+            userQuery.value = transcript;
+            setDefaultMicButton();
+        };
+
+        recognition.onerror = function(event) {
+            setDefaultMicButton();
+            alert("Error occurred in recognition: " + event.error);
+        };
+
+        recognition.onend = function() {
+            setDefaultMicButton();
+        };
+
+        function setDefaultMicButton() {
+            micButton.innerHTML = '<i class="fas fa-microphone"></i>';
+        }
+
+        document.getElementById('user_input').addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            var pdfFile = document.getElementById('pdf_file').files[0];
+            var userQuery = document.getElementById('user_query').value;
+            if (!pdfFile) {
+                alert("No File Chosen!\nPlease upload a PDF file.");
+                return;
+            }
+            if (!userQuery.trim()) {
+                alert("Please enter your question.");
+                return;
+            }
+
+            var formData = new FormData();
+            formData.append('pdf_file', pdfFile);
+            formData.append('user_query', userQuery);
+
+            document.getElementById('send_button').disabled = true;
+            document.getElementById('loading-label').style.display = 'block';
+            document.getElementById('loading-gif').style.display = 'block';
+            document.getElementById('send_button').style.cursor = 'not-allowed';
+
+            fetch('/chat', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('loading-label').style.display = 'none';
+                document.getElementById('loading-gif').style.display = 'none';
+                document.getElementById('send_button').disabled = false;
+                document.getElementById('send_button').style.cursor = 'pointer';
+
+                if (data.error) {
+                    document.getElementById('error-message').innerText = data.error;
+                    return;
+                }
+
+                var title = data.title;
+                var answer = data.answer;
+                var questionTimestamp = data.question_timestamp;
+                var answerTimestamp = data.answer_timestamp;
+
+                var responseContainer = document.getElementById('response');
+                responseContainer.innerHTML += `
+                    <div class="message-container">
+                        <div class="user-message">
+                            ${userQuery}
+                            <div class="timestamp">${questionTimestamp}</div>
+                        </div>
+                        <div class="bot-message">
+                            ${answer}
+                            <div class="timestamp">${answerTimestamp}</div>
+                        </div>
+                    </div>`;
+
+                document.getElementById('user_query').value = '';
+
+                updateHistory();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('loading-label').style.display = 'none';
+                document.getElementById('loading-gif').style.display = 'none';
+                document.getElementById('send_button').disabled = false;
+                document.getElementById('send_button').style.cursor = 'hand';
+                alert("Error: " + error.message);
+            });
+        });
+
+        function updateHistory() {
+            fetch('/conversations')
+            .then(response => response.json())
+            .then(data => {
+                var historyContainer = document.getElementById('history');
+                historyContainer.innerHTML = '';
+
+                for (let pdfTitle in data) {
+                    let historyItem = document.createElement('div');
+                    historyItem.classList.add('history-item');
+                    historyItem.innerHTML = pdfTitle;
+                    historyItem.addEventListener('click', function() {
+                        displayConversations(pdfTitle, data[pdfTitle]);
+                    });
+                    historyContainer.appendChild(historyItem);
+                }
+            });
+        }
+
+        function displayConversations(title, conversations) {
+            var responseContainer = document.getElementById('response');
+            responseContainer.innerHTML = '';
+
+            conversations.forEach(function(convo) {
+                responseContainer.innerHTML += `
+                    <div class="message-container">
+                        <div class="user-message">
+                            ${convo.question}
+                            <div class="timestamp">${convo.question_timestamp}</div>
+                        </div>
+                        <div class="bot-message">
+                            ${convo.answer}
+                            <div class="timestamp">${convo.answer_timestamp}</div>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        // Initial call to load history on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            updateHistory();
+        });
+
+    </script>
+</body>
+</html>
